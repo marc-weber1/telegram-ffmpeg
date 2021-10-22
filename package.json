@@ -1,5 +1,6 @@
 {
   "dependencies": {
+    "axios": "^0.23.0",
     "telegraf": "^4.4.2"
   }
 }
