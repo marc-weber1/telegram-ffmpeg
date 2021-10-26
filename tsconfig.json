@@ -1,0 +1,9 @@
+{
+    "compilerOptions": {
+        "module": "CommonJS",
+        "outDir": "build"
+    },
+    "files": [
+        "src/main.ts"
+    ]
+}
