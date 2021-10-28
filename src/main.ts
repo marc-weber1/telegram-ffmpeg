@@ -11,12 +11,18 @@ const exec = require('child_process').exec;
 const AUDIO_TYPES = [
   "mp3", "flac", "wav"
 ]
+const AUDIO_CODEC = {
+  "mp3": "libmp3lame",
+  "flac": "flac",
+  "wav": "pcm_s16le"
+}
 
 interface AudioContainer{
   url: URL,
   file_unique_id: string,
   mime_type: string,
-  file_size: number
+  file_size: number,
+  message_id: number
 }
 
 interface SessionData{
@@ -28,6 +34,7 @@ interface SessionData{
 interface MRContext extends Context {
   session?: SessionData
 }
+
 
 const token = process.env.BOT_TOKEN
 if (token === undefined) {
@@ -53,30 +60,38 @@ function downloadFile(url : URL, path : string){
 
  function execShellCommand(cmd) {
   return new Promise((resolve, reject) => {
-   exec(cmd, (error, stdout, stderr) => {
-    if (error) {
-     console.warn(error);
-    }
-    resolve(stdout? stdout : stderr);
-   });
+    exec(cmd, (error, stdout, stderr) => {
+      if (error) {
+        console.warn(error);
+      }
+      resolve(stdout? stdout : stderr);
+    });
   });
  }
 
 // Assumes ctx.session.lastMedia and audioOutType exist, and possibly audioOutCompression if the format needs it
-async function convertFile(ctx: MRContext){ // TODO
+async function convertFile(ctx: MRContext){
+  const outFile = process.env.MAIN_PATH + "/temp-downloads/" + ctx.session.lastMedia.file_unique_id + "." + ctx.session.audioOutType
+  var ffOptions = ""
+
   if(ctx.session.audioOutType === "mp3"){
-    // Download and process
-    return execShellCommand(`ffmpeg -i "${ctx.session.lastMedia.url}" -vn -c:a libmp3lame -q ${ctx.session.audioOutCompression} ${process.env.MAIN_PATH}/temp-downloads/${ctx.session.lastMedia.file_unique_id}.mp3`)
-      .then(() => { // Send back to the user
-        return ctx.replyWithAudio({source: `${process.env.MAIN_PATH}/temp-downloads/${ctx.session.lastMedia.file_unique_id}.mp3`})
-      })
-      .then(() => {  // Delete the file after
-        return fsPromises.unlink(`${process.env.MAIN_PATH}/temp-downloads/${ctx.session.lastMedia.file_unique_id}.mp3`)
-      })
+    ffOptions = `-q ${ctx.session.audioOutCompression}`
   }
-  else if(ctx.session.audioOutType === "wav"){
-    // ...
-  }
+  
+  // Download and process
+  return execShellCommand(`ffmpeg -i "${ctx.session.lastMedia.url}" -vn -c:a ${AUDIO_CODEC[ctx.session.audioOutType]} ${ffOptions} ${outFile}`)
+    .then(() => { // Send back to the user
+      return ctx.replyWithDocument({source: outFile}, {reply_to_message_id : ctx.session.lastMedia.message_id})
+    })
+    /*.then((uFile) => { // Save the sent message and continue the processing chain
+      return ctx.telegram.getFileLink(uFile.document.file_id)
+        .then((url) => {
+          ctx.session.lastMedia = {url: url, }
+        })
+    })*/
+    .then(() => { // Delete the file after
+      return fsPromises.unlink(outFile)
+    })
 }
 
 
@@ -100,7 +115,7 @@ bot.on("message", (ctx: MRContext, next) => {
 
     ctx.telegram.getFileLink(audio.file_id)
       .then(url => {
-        ctx.session.lastMedia = {url: url, file_unique_id: audio.file_unique_id, mime_type: audio.mime_type, file_size: audio.file_size}
+        ctx.session.lastMedia = {url: url, file_unique_id: audio.file_unique_id, mime_type: audio.mime_type, file_size: audio.file_size, message_id: ctx.message.message_id}
         ctx.reply("What audio format to convert to?", Markup
           .keyboard(AUDIO_TYPES)
           .oneTime()
@@ -116,12 +131,12 @@ bot.on("message", (ctx: MRContext, next) => {
 
     ctx.telegram.getFileLink(video.file_id)
       .then(url => {
-        ctx.session.lastMedia = {url: url, file_unique_id: video.file_unique_id, mime_type: video.mime_type, file_size: video.file_size}
+        ctx.session.lastMedia = {url: url, file_unique_id: video.file_unique_id, mime_type: video.mime_type, file_size: video.file_size, message_id: ctx.message.message_id}
         ctx.reply("What audio format to convert to?", Markup
           .keyboard(AUDIO_TYPES)
           .oneTime()
           .resize()
-          )
+        )
       })
       .catch(error => {
         ctx.reply(error)
@@ -136,12 +151,12 @@ bot.on("message", (ctx: MRContext, next) => {
 
     ctx.telegram.getFileLink(document.file_id)
       .then(url => {
-        ctx.session.lastMedia = {url: url, file_unique_id: document.file_unique_id, mime_type: document.mime_type, file_size: document.file_size}
+        ctx.session.lastMedia = {url: url, file_unique_id: document.file_unique_id, mime_type: document.mime_type, file_size: document.file_size, message_id: ctx.message.message_id}
         ctx.reply("What audio format to convert to?", Markup
           .keyboard(AUDIO_TYPES)
           .oneTime()
           .resize()
-          )
+        )
       })
       .catch(error => {
         ctx.reply(error)
@@ -162,7 +177,7 @@ bot.on("message", (ctx: MRContext, next) => {
       else{
         // Ready to convert
         ctx.session.audioOutCompression = compression
-        convertFile(ctx).then(_ => {
+        convertFile(ctx).then(() => {
           // Reset the bot
           ctx.session.lastMedia = undefined // Change this to the media just uploaded next
           ctx.session.audioOutType = undefined
@@ -198,7 +213,7 @@ bot.on("message", (ctx: MRContext, next) => {
           .keyboard(AUDIO_TYPES)
           .oneTime()
           .resize()
-          )
+        )
       }
     }
     else{
