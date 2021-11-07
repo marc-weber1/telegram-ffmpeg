@@ -5,6 +5,7 @@ import * as fs from 'fs'
 var fsPromises = require('fs').promises
 const mime = require('mime-types')
 const exec = require('child_process').exec;
+var Url = require('url-parse')
 
 //const MAX_FILE_SIZE = 50 << 20  // << 20 converts MB to bytes
 
@@ -58,19 +59,31 @@ function downloadFile(url : URL, path : string){
 }
 
 
- function execShellCommand(cmd) {
-  return new Promise((resolve, reject) => {
-    exec(cmd, (error, stdout, stderr) => {
-      if (error) {
-        console.warn(error);
-      }
-      resolve(stdout? stdout : stderr);
-    });
+async function execShellCommand(cmd: String): Promise<String> {
+return new Promise((resolve, reject) => {
+  exec(cmd, (error: String, stdout: String, stderr: String) => {
+    if (error) {
+      reject(error);
+    }
+    resolve(stdout? stdout : stderr);
   });
- }
+});
+}
+
+async function ytdlGetLink(url: URL, message: Message.TextMessage): Promise<AudioContainer>{
+  return execShellCommand(`youtube-dl -g "${url.toString()}"`)
+    .then((ytdurl: String) => {
+      var finalLine: String = ytdurl.split(/\r?\n/)[1]
+      //console.log(finalLine)
+      return {url: new Url(finalLine), message_id: message.message_id, file_unique_id: "test", mime_type: "video/mp4", file_size: -1}
+    })
+    .catch(error => {
+      return Promise.reject()
+    })
+}
 
 // Assumes ctx.session.lastMedia and audioOutType exist, and possibly audioOutCompression if the format needs it
-async function convertFile(ctx: MRContext){
+async function convertFile(ctx: MRContext): Promise<any>{
   const outFile = process.env.MAIN_PATH + "/temp-downloads/" + ctx.session.lastMedia.file_unique_id + "." + ctx.session.audioOutType
   var ffOptions = ""
 
@@ -102,7 +115,7 @@ bot.use(session())
 
 bot.start((ctx) => ctx.reply('Hi! Forward a video to me, or paste a youtube link.'))
 
-bot.on("message", (ctx: MRContext, next) => {
+bot.on("message", async (ctx: MRContext, next) => {
   ctx.session ??= {} //Initialize session
 
   // Media
@@ -113,7 +126,7 @@ bot.on("message", (ctx: MRContext, next) => {
       audio.mime_type = "audio/x-flac"
     }
 
-    ctx.telegram.getFileLink(audio.file_id)
+    return ctx.telegram.getFileLink(audio.file_id)
       .then(url => {
         ctx.session.lastMedia = {url: url, file_unique_id: audio.file_unique_id, mime_type: audio.mime_type, file_size: audio.file_size, message_id: ctx.message.message_id}
         ctx.reply("What audio format to convert to?", Markup
@@ -129,7 +142,7 @@ bot.on("message", (ctx: MRContext, next) => {
   else if( "video" in ctx.message ){
     let video = (ctx.message as Message.VideoMessage).video
 
-    ctx.telegram.getFileLink(video.file_id)
+    return ctx.telegram.getFileLink(video.file_id)
       .then(url => {
         ctx.session.lastMedia = {url: url, file_unique_id: video.file_unique_id, mime_type: video.mime_type, file_size: video.file_size, message_id: ctx.message.message_id}
         ctx.reply("What audio format to convert to?", Markup
@@ -146,10 +159,10 @@ bot.on("message", (ctx: MRContext, next) => {
     let document = (ctx.message as Message.DocumentMessage).document
 
     if( document.mime_type.split("/")[0] != "video" && document.mime_type.split("/")[0] != "audio" ){
-      ctx.reply("Send audio or video to start.").then(ret => {return next()})
+      return ctx.reply("Send audio or video to start.").then(ret => {return next()})
     }
 
-    ctx.telegram.getFileLink(document.file_id)
+    return ctx.telegram.getFileLink(document.file_id)
       .then(url => {
         ctx.session.lastMedia = {url: url, file_unique_id: document.file_unique_id, mime_type: document.mime_type, file_size: document.file_size, message_id: ctx.message.message_id}
         ctx.reply("What audio format to convert to?", Markup
@@ -163,25 +176,54 @@ bot.on("message", (ctx: MRContext, next) => {
       })
   }
 
-  // Arguments for converting media
+  
   else if( "text" in ctx.message){
     let text = (ctx.message as Message.TextMessage).text
+
+    // Check for a link to ytdl
+
+    try{
+      var url = new Url(text)
+      if(url.protocol === "http:" || url.protocol === "https:"){
+
+        return ytdlGetLink(url.toString(), ctx.message)
+          .then((container) => {
+            ctx.session.lastMedia = container
+            return ctx.reply("What audio format to convert to?", Markup
+              .keyboard(AUDIO_TYPES)
+              .oneTime()
+              .resize()
+            )
+          })
+          .catch(error => {
+            return ctx.reply("Failed to process link. Does it have media on it?")
+          })
+        
+      }
+    }
+    catch(_) {}
+
+    // Arguments for converting media
 
     if( ctx.session.audioOutType ){
       // Try to get a bitrate number out of 'text'
       let compression: number = Number(text)
 
       if( isNaN(compression) ){
-        ctx.reply("Requires a number between 0 and 10.")
+        return ctx.reply("Requires a number between 0 and 10.")
       }
       else{
         // Ready to convert
         ctx.session.audioOutCompression = compression
-        convertFile(ctx).then(() => {
-          // Reset the bot
-          ctx.session.lastMedia = undefined // Change this to the media just uploaded next
-          ctx.session.audioOutType = undefined
-        })
+        return convertFile(ctx)
+          .then(() => {
+            // Reset the bot
+            ctx.session.lastMedia = undefined // Change this to the media just uploaded next
+            ctx.session.audioOutType = undefined
+          })
+          .catch(error => {
+            ctx.reply(error)
+          })
         
       }
     }
@@ -192,39 +234,46 @@ bot.on("message", (ctx: MRContext, next) => {
         ctx.session.lastMedia = undefined
         ctx.session.audioOutType = undefined
 
-        ctx.reply("OK. Send more media when you're ready to convert again.")
+        return ctx.reply("OK. Send more media when you're ready to convert again.")
       }
       else if(text === "wav" || text == "flac"){
         ctx.session.audioOutType = text
         // Ready to convert
-        convertFile(ctx).then(_ => {
-          // Reset the bot
-          ctx.session.lastMedia = undefined // Change this to the media just uploaded next
-          ctx.session.audioOutType = undefined
-        })
+        return convertFile(ctx)
+          .then(_ => {
+            // Reset the bot
+            ctx.session.lastMedia = undefined // Change this to the media just uploaded next
+            ctx.session.audioOutType = undefined
+          })
+          .catch(error => {
+            ctx.reply(error)
+          })
       }
       else if(text === "mp3"){
         //We still need a bitrate
         ctx.session.audioOutType = text
-        ctx.reply("Give the amount of compression to apply from 0 (best) to 10 (worst).")
+        return ctx.reply("Give the amount of compression to apply from 0 (best) to 10 (worst).")
       }
       else{
-        ctx.reply("Please pick one of the options: " + AUDIO_TYPES.join(", "), Markup
+        return ctx.reply("Please pick one of the options: " + AUDIO_TYPES.join(", "), Markup
           .keyboard(AUDIO_TYPES)
           .oneTime()
           .resize()
         )
       }
     }
+
+    // Unexpected text
+
     else{
-      ctx.reply("Start by sending audio or video.")
+      return ctx.reply("Start by sending audio or video.")
     }
     
   }
 
   // Not media, not text (images, stickers?)
   else{
-    ctx.reply("Couldn't understand the message.")
+    return ctx.reply("Couldn't understand the message.")
   }
   
 } )

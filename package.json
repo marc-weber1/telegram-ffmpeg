@@ -3,6 +3,7 @@
     "axios": "^0.23.0",
     "mime-types": "^2.1.33",
     "telegraf": "^4.4.2",
-    "ts-node": "^10.4.0"
+    "ts-node": "^10.4.0",
+    "url-parse": "^1.5.3"
   }
 }
