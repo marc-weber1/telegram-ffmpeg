@@ -1,5 +1,6 @@
 import { Telegraf, Context, Markup, session } from 'telegraf'
-import { Message } from 'typegram'
+import { Message, User } from 'typegram'
+import { ExtraReplyMessage } from 'telegraf/typings/telegram-types'
 import axios from 'axios'
 import * as fs from 'fs'
 var fsPromises = require('fs').promises
@@ -34,6 +35,15 @@ interface SessionData{
 
 interface MRContext extends Context {
   session?: SessionData
+
+  /*getTelegramName(): string{
+    return this.from.id + " (" + this.from.first_name + ")"
+  }
+
+  replyLog(text: string, extra?: ExtraReplyMessage): Promise<Message.TextMessage>{
+    console.log("To %s: %s", "idk lol", text)
+    return super.reply(text, extra)
+  }*/
 }
 
 
@@ -45,6 +55,10 @@ if (token === undefined) {
 
 
 // Utility
+
+function getTGName(user: User): string{
+  return user.first_name + " (" + user.id + ")"
+}
 
 function downloadFile(url : URL, path : string){
   return axios({ url: url.href , responseType: 'stream'})
@@ -129,6 +143,8 @@ bot.on("message", async (ctx: MRContext, next) => {
     return ctx.telegram.getFileLink(audio.file_id)
       .then(url => {
         ctx.session.lastMedia = {url: url, file_unique_id: audio.file_unique_id, mime_type: audio.mime_type, file_size: audio.file_size, message_id: ctx.message.message_id}
+        console.log("%s sent media: %s", getTGName(ctx.from), JSON.stringify(ctx.session.lastMedia))
+        
         ctx.reply("What audio format to convert to?", Markup
           .keyboard(AUDIO_TYPES)
           .oneTime()
@@ -145,6 +161,8 @@ bot.on("message", async (ctx: MRContext, next) => {
     return ctx.telegram.getFileLink(video.file_id)
       .then(url => {
         ctx.session.lastMedia = {url: url, file_unique_id: video.file_unique_id, mime_type: video.mime_type, file_size: video.file_size, message_id: ctx.message.message_id}
+        console.log("%s sent media: %s", getTGName(ctx.from), JSON.stringify(ctx.session.lastMedia))
+        
         ctx.reply("What audio format to convert to?", Markup
           .keyboard(AUDIO_TYPES)
           .oneTime()
@@ -165,6 +183,8 @@ bot.on("message", async (ctx: MRContext, next) => {
     return ctx.telegram.getFileLink(document.file_id)
       .then(url => {
         ctx.session.lastMedia = {url: url, file_unique_id: document.file_unique_id, mime_type: document.mime_type, file_size: document.file_size, message_id: ctx.message.message_id}
+        console.log("%s sent media: %s", getTGName(ctx.from), JSON.stringify(ctx.session.lastMedia))
+        
         ctx.reply("What audio format to convert to?", Markup
           .keyboard(AUDIO_TYPES)
           .oneTime()
@@ -175,7 +195,25 @@ bot.on("message", async (ctx: MRContext, next) => {
         ctx.reply(error)
       })
   }
+  else if("voice" in ctx.message){
+    let voice = (ctx.message as Message.VoiceMessage).voice
 
+    
+    return ctx.telegram.getFileLink(voice.file_id)
+      .then((url) => {
+        ctx.session.lastMedia = {url: url, file_unique_id: voice.file_unique_id, mime_type: voice.mime_type, file_size: voice.file_size, message_id: ctx.message.message_id}
+        console.log("%s sent media: %s", getTGName(ctx.from), JSON.stringify(ctx.session.lastMedia))
+        
+        ctx.reply("What audio format to convert to?", Markup
+          .keyboard(AUDIO_TYPES)
+          .oneTime()
+          .resize()
+        )
+      })
+      .catch(error => {
+        ctx.reply(error)
+      })
+  }
   
   else if( "text" in ctx.message){
     let text = (ctx.message as Message.TextMessage).text
@@ -185,6 +223,7 @@ bot.on("message", async (ctx: MRContext, next) => {
     try{
       var url = new Url(text)
       if(url.protocol === "http:" || url.protocol === "https:"){
+        console.log("%s sent link: %s", getTGName(ctx.from), text)
 
         return ytdlGetLink(url.toString(), ctx.message)
           .then((container) => {
@@ -204,6 +243,7 @@ bot.on("message", async (ctx: MRContext, next) => {
     catch(_) {}
 
     // Arguments for converting media
+    console.log("%s: %s", getTGName(ctx.from), text)
 
     if( ctx.session.audioOutType ){
       // Try to get a bitrate number out of 'text'
@@ -215,9 +255,12 @@ bot.on("message", async (ctx: MRContext, next) => {
       else{
         // Ready to convert
         ctx.session.audioOutCompression = compression
+        console.log("%s is downloading a file of size %s ...", getTGName(ctx.from), ctx.session.lastMedia.file_size)
+
         return convertFile(ctx)
           .then(() => {
             // Reset the bot
+            console.log("Finished converting.")
             ctx.session.lastMedia = undefined // Change this to the media just uploaded next
             ctx.session.audioOutType = undefined
           })
@@ -238,9 +281,13 @@ bot.on("message", async (ctx: MRContext, next) => {
       }
       else if(text === "wav" || text == "flac"){
         ctx.session.audioOutType = text
+        console.log("%s is downloading a file of size %s ...", getTGName(ctx.from), ctx.session.lastMedia.file_size)
+
         // Ready to convert
         return convertFile(ctx)
           .then(_ => {
+            console.log("Finished converting.")
+
             // Reset the bot
             ctx.session.lastMedia = undefined // Change this to the media just uploaded next
             ctx.session.audioOutType = undefined
