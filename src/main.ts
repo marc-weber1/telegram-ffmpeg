@@ -34,7 +34,8 @@ bot.on("message", async (ctx: MRContext, next) => {
     
     return AM.getContainer(ctx)
       .then(async (container: AM) => {
-        console.log("%s sent media %s of size %d",)
+        ctx.session.lastMedia = container
+        console.log("%s sent media: %s", MRContext.getTGName(ctx.from), ctx.session.lastMedia.toString() )
 
         return ctx.reply("What audio format to convert to?", Markup
             .keyboard(ctx.session.lastMedia.getKeyboardOptions())
@@ -68,6 +69,7 @@ bot.on("message", async (ctx: MRContext, next) => {
             )
           })
           .catch(error => {
+            console.log(error)
             return ctx.reply("Failed to process link. Does it have media on it?")
           })
         
@@ -78,6 +80,7 @@ bot.on("message", async (ctx: MRContext, next) => {
     // Arguments for converting media
     console.log("%s: %s", MRContext.getTGName(ctx.from), text)
 
+    // They've answered what output type they want
     if( ctx.session.audioOutType ){
       // Try to get a bitrate number out of 'text'
       let compression: number = Number(text)
@@ -88,7 +91,7 @@ bot.on("message", async (ctx: MRContext, next) => {
       else{
         // Ready to convert
         ctx.session.audioOutCompression = compression
-        console.log("%s is downloading a file of size %s ...", MRContext.getTGName(ctx.from), ctx.session.lastMedia.container.file_size)
+        console.log("%s is downloading a file of size %s ...", MRContext.getTGName(ctx.from), ctx.session.lastMedia.getFileSize())
 
         return ctx.session.lastMedia.convertFile(ctx)
           .then(() => {
@@ -103,6 +106,8 @@ bot.on("message", async (ctx: MRContext, next) => {
         
       }
     }
+
+    // They've given media
     else if( ctx.session.lastMedia ){ //What to convert to?
 
       if(text === "done"){
@@ -113,7 +118,7 @@ bot.on("message", async (ctx: MRContext, next) => {
         return ctx.reply("OK. Send more media when you're ready to convert again.")
       }
       else if(text === "wav" || text === "flac" || text === "original quality"){
-        console.log("%s is downloading a file of size %s ...", MRContext.getTGName(ctx.from), ctx.session.lastMedia.container.file_size)
+        console.log("%s is downloading a file of size %s ...", MRContext.getTGName(ctx.from), ctx.session.lastMedia.getFileSize())
         ctx.session.audioOutType = text
 
         // Ready to convert
