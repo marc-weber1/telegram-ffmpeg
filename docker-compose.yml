@@ -1,0 +1,14 @@
+version: '3.7'
+
+services:
+  telegram-ffmpeg:
+    build:
+      context: .
+      dockerfile: dockerfile
+    env_file:
+      - ENV.txt
+    volumes:
+      - ./temp-downloads:/home/facade/temp-downloads
+    restart: always
+    container_name: telegram-ffmpeg
+    command: node build/main.js

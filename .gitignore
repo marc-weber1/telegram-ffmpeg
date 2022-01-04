@@ -1,2 +1,5 @@
 run.sh
 build/*
+node_modules/*
+*ENV*
+*env*
